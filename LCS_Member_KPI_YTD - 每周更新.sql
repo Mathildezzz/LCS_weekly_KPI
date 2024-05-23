@@ -10,10 +10,10 @@ FROM edw.f_member_order_detail trans
 LEFT JOIN (SELECT original_store_code, 
                   original_order_id,
                   MIN(order_paid_time) AS order_paid_time
-            FROM edw.f_lcs_order_detail
+            FROM edw.f_member_order_detail
              GROUP BY  1,2
         ) orders
-      ON trans.original_order_id = CONCAT(orders.original_store_code, orders.original_order_id)
+      ON trans.original_order_id = orders.original_order_id
     WHERE is_rrp_sales_type = 1 
       AND if_eff_order_tag IS TRUE
       AND distributor_name LIKE '%LCS%'  -- distributor_name
