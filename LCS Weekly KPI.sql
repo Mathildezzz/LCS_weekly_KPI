@@ -38,6 +38,7 @@ existing_never_purchased_base AS (
                       AND if_eff_order_tag IS TRUE
                       AND distributor_name <> 'LBR'
                       AND date_id < '{}'   -- start_date
+                      AND distributor_name LIKE '{}'   -- distributor_name
                 ) purchased
            ON mbr.member_detail_id::integer = purchased.crm_member_id::integer
    WHERE DATE(join_time) < '{}'            -- start_date
