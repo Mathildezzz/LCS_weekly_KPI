@@ -33,7 +33,7 @@ new_member_base AS (
 SELECT DISTINCT member_detail_id, eff_reg_channel
             FROM edw.d_member_detail 
            WHERE 1=1
-             AND DATE(join_time) >= '2024-01-01'            -- start_date
+             AND DATE(join_time) >= DATE_TRUNC('year', getdate())::date            -- start_date
              AND DATE(join_time) < current_date             -- end_date
              AND UPPER(eff_reg_channel) LIKE '%LCS%'   -- distributor_name
 ),
@@ -42,14 +42,14 @@ existing_never_purchased_base AS (
   SELECT DISTINCT mbr.member_detail_id
     FROM edw.d_member_detail mbr
     LEFT JOIN (           SELECT DISTINCT crm_member_id::integer
-                     FROM edw.f_member_order_detail 
-                    WHERE is_rrp_sales_type = 1 
+                     FROM edw.f_member_order_detail
+                    WHERE is_rrp_sales_type = 1
                       AND if_eff_order_tag IS TRUE
                       AND distributor_name <> 'LBR'
-                      AND date_id < '2024-01-01'   -- start_date
+                      AND date_id < DATE_TRUNC('year', getdate())::date   -- start_date
                 ) purchased
            ON mbr.member_detail_id::integer = purchased.crm_member_id::integer
-   WHERE DATE(join_time) < '2024-01-01'            -- start_date
+   WHERE DATE(join_time) < DATE_TRUNC('year', getdate())::date            -- start_date
      AND UPPER(eff_reg_channel) LIKE '%LCS%'  -- distributor_name
      AND purchased.crm_member_id IS NULL
 ),
@@ -57,13 +57,13 @@ existing_never_purchased_base AS (
 
 existing_retain_base AS (
   SELECT DISTINCT crm_member_id, distributor_name
-             FROM edw.f_member_order_detail 
-            WHERE is_rrp_sales_type = 1 
+             FROM edw.f_member_order_detail
+            WHERE is_rrp_sales_type = 1
               AND if_eff_order_tag IS TRUE
               AND distributor_name <> 'LBR'
               AND distributor_name LIKE '%LCS%'   -- distributor_name
-              AND date_id >= '2023-01-01'  -- fixed
-              AND date_id < '2024-01-01'   -- fixed
+              AND date_id >= DATE_TRUNC('year', dateadd(year,-1, current_date))::date  -- fixed
+              AND date_id < DATE_TRUNC('year', getdate())::date   -- fixed
 ),
 
 
@@ -72,20 +72,20 @@ existing_reactivate_base AS (
              FROM edw.f_member_order_detail trans
         LEFT JOIN (SELECT DISTINCT crm_member_id::integer FROM existing_retain_base) retain
                ON trans.crm_member_id::integer = retain.crm_member_id::integer
-            WHERE is_rrp_sales_type = 1 
+            WHERE is_rrp_sales_type = 1
               AND if_eff_order_tag IS TRUE
               AND distributor_name <> 'LBR'
               AND distributor_name LIKE '%LCS%'    -- distributor_name
-              AND date_id < '2023-01-01'        -- fixed
-              AND retain.crm_member_id IS NULL  
+              AND date_id < DATE_TRUNC('year', dateadd(year,-1, current_date))::date        -- fixed
+              AND retain.crm_member_id IS NULL
 ),
 
 
-existing_2024_initial_purchase_base AS (
+existing_ytd_initial_purchase_base AS (
   SELECT DISTINCT crm_member_id
     FROM all_purchase_rk   -- 已过滤distributor
- WHERE DATE(order_paid_time) >= '2024-01-01' -- fixed
-   AND DATE(order_paid_time) < '2024-01-01'          -- start_date
+ WHERE DATE(order_paid_time) >= DATE_TRUNC('year', getdate())::date -- fixed
+   AND DATE(order_paid_time) < DATE_TRUNC('year', getdate())::date          -- start_date
    AND rk = 1
 ),
 
@@ -95,77 +95,77 @@ existing_other_channel_reg_new_belong AS (
     FROM all_purchase_rk
 LEFT JOIN new_member_base
       ON all_purchase_rk.crm_member_id::integer = new_member_base.member_detail_id::integer
- WHERE DATE(order_paid_time) >= '2024-01-01'            -- start_date
+ WHERE DATE(order_paid_time) >= DATE_TRUNC('year', getdate())::date            -- start_date
    AND DATE(order_paid_time) < current_date            -- end_date
-   AND UPPER(all_purchase_rk.eff_reg_channel) NOT LIKE '%LCS%'  -- distributor_name 
+   AND UPPER(all_purchase_rk.eff_reg_channel) NOT LIKE '%LCS%'  -- distributor_name
    AND rk = 1
    AND new_member_base.member_detail_id IS NULL
 ),
 
 existing_3_month_purchased_base AS (
 SELECT crm_member_id,
-       MAX(CASE WHEN order_paid_time >= '2024-01-01' - 90 AND order_paid_time < '2024-01-01'  THEN 1 ELSE 0 END) AS if_3_month_not_purchased -- [-90, 0)
+       MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 90 AND order_paid_time < DATE_TRUNC('year', getdate())::date  THEN 1 ELSE 0 END) AS if_3_month_not_purchased -- [-90, 0)
  FROM all_purchase -- 已过滤distributor
  GROUP BY 1
- HAVING MAX(CASE WHEN order_paid_time >= '2024-01-01' - 90 AND order_paid_time < '2024-01-01' THEN 1 ELSE 0 END) = 1   -- start_date
+ HAVING MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 90 AND order_paid_time < DATE_TRUNC('year', getdate())::date THEN 1 ELSE 0 END) = 1   -- start_date
 ),
 
 existing_3_month_not_purchased_base AS (
 SELECT crm_member_id,
-       MAX(CASE WHEN order_paid_time >= '2024-01-01' - 90 AND order_paid_time < '2024-01-01' THEN 1 ELSE 0 END) AS if_3_month_not_purchased, -- [-90, 0)
-       MAX(CASE WHEN order_paid_time >= '2024-01-01' - 180 AND order_paid_time < '2024-01-01' - 90 THEN 1 ELSE 0 END) AS if_3_6_month_purchased  -- [-180, -90)
+       MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 90 AND order_paid_time < DATE_TRUNC('year', getdate())::date THEN 1 ELSE 0 END) AS if_3_month_not_purchased, -- [-90, 0)
+       MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 180 AND order_paid_time < DATE_TRUNC('year', getdate())::date - 90 THEN 1 ELSE 0 END) AS if_3_6_month_purchased  -- [-180, -90)
  FROM all_purchase -- 已过滤distributor
  GROUP BY 1
- HAVING MAX(CASE WHEN order_paid_time >= '2024-01-01' - 90 AND order_paid_time < '2024-01-01'  THEN 1 ELSE 0 END) = 0
-    AND MAX(CASE WHEN order_paid_time >= '2024-01-01' - 180 AND order_paid_time < '2024-01-01' - 90 THEN 1 ELSE 0 END) = 1
+ HAVING MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 90 AND order_paid_time < DATE_TRUNC('year', getdate())::date  THEN 1 ELSE 0 END) = 0
+    AND MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 180 AND order_paid_time < DATE_TRUNC('year', getdate())::date - 90 THEN 1 ELSE 0 END) = 1
 ),
 
 
 
 existing_6_month_not_purchased_base AS (
 SELECT crm_member_id,
-       MAX(CASE WHEN order_paid_time >= '2024-01-01'  - 180 AND order_paid_time < '2024-01-01' THEN 1 ELSE 0 END) AS if_6_month_not_purchased, -- [-180, -90)
-       MAX(CASE WHEN order_paid_time >= '2024-01-01'  - 270 AND order_paid_time < '2024-01-01' - 180 THEN 1 ELSE 0 END) AS if_6_9_month_purchased  -- [-270, -180)
+       MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date  - 180 AND order_paid_time < DATE_TRUNC('year', getdate())::date THEN 1 ELSE 0 END) AS if_6_month_not_purchased, -- [-180, -90)
+       MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date  - 270 AND order_paid_time < DATE_TRUNC('year', getdate())::date - 180 THEN 1 ELSE 0 END) AS if_6_9_month_purchased  -- [-270, -180)
  FROM all_purchase -- 已过滤distributor
  GROUP BY 1
- HAVING MAX(CASE WHEN order_paid_time >= '2024-01-01' - 180 AND order_paid_time < '2024-01-01'  THEN 1 ELSE 0 END) = 0
-    AND MAX(CASE WHEN order_paid_time >= '2024-01-01'  - 270 AND order_paid_time < '2024-01-01' - 180 THEN 1 ELSE 0 END) = 1
+ HAVING MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 180 AND order_paid_time < DATE_TRUNC('year', getdate())::date  THEN 1 ELSE 0 END) = 0
+    AND MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date  - 270 AND order_paid_time < DATE_TRUNC('year', getdate())::date - 180 THEN 1 ELSE 0 END) = 1
 ),
 
 
 existing_9_month_not_purchased_base AS (
 SELECT crm_member_id,
-       MAX(CASE WHEN order_paid_time >= '2024-01-01' - 270 AND order_paid_time < '2024-01-01' THEN 1 ELSE 0 END) AS if_9_month_not_purchased, -- [-270, -0)
-       MAX(CASE WHEN order_paid_time >= '2024-01-01' - 360 AND order_paid_time < '2024-01-01' - 270 THEN 1 ELSE 0 END) AS if_9_12_month_purchased  -- [-360, -270)
+       MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 270 AND order_paid_time < DATE_TRUNC('year', getdate())::date THEN 1 ELSE 0 END) AS if_9_month_not_purchased, -- [-270, -0)
+       MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 360 AND order_paid_time < DATE_TRUNC('year', getdate())::date - 270 THEN 1 ELSE 0 END) AS if_9_12_month_purchased  -- [-360, -270)
  FROM all_purchase -- 已过滤distributor
  GROUP BY 1
- HAVING MAX(CASE WHEN order_paid_time >= '2024-01-01'- 270 AND order_paid_time < '2024-01-01' THEN 1 ELSE 0 END) = 0
-    AND MAX(CASE WHEN order_paid_time >= '2024-01-01' - 360 AND order_paid_time < '2024-01-01' - 270 THEN 1 ELSE 0 END) = 1
+ HAVING MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date- 270 AND order_paid_time < DATE_TRUNC('year', getdate())::date THEN 1 ELSE 0 END) = 0
+    AND MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 360 AND order_paid_time < DATE_TRUNC('year', getdate())::date - 270 THEN 1 ELSE 0 END) = 1
 ),
 
 
 existing_12_month_and_longer_not_purchased_base AS (
 SELECT crm_member_id,
-       MAX(CASE WHEN order_paid_time >= '2024-01-01' - 360 AND order_paid_time < '2024-01-01' THEN 1 ELSE 0 END)      AS if_12_month_not_purchased, -- [-360, -0)
-       MAX(CASE WHEN order_paid_time < '2024-01-01' - 360 THEN 1 ELSE 0 END)                                             AS if_before_12_month_purchased  -- [-360, -270)
+       MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 360 AND order_paid_time < DATE_TRUNC('year', getdate())::date THEN 1 ELSE 0 END)      AS if_12_month_not_purchased, -- [-360, -0)
+       MAX(CASE WHEN order_paid_time < DATE_TRUNC('year', getdate())::date - 360 THEN 1 ELSE 0 END)                                             AS if_before_12_month_purchased  -- [-360, -270)
  FROM all_purchase -- 已过滤distributor
  GROUP BY 1
- HAVING MAX(CASE WHEN order_paid_time >= '2024-01-01' - 360 AND order_paid_time < '2024-01-01' THEN 1 ELSE 0 END) = 0
-    AND MAX(CASE WHEN order_paid_time < '2024-01-01' - 360 THEN 1 ELSE 0 END)  = 1
+ HAVING MAX(CASE WHEN order_paid_time >= DATE_TRUNC('year', getdate())::date - 360 AND order_paid_time < DATE_TRUNC('year', getdate())::date THEN 1 ELSE 0 END) = 0
+    AND MAX(CASE WHEN order_paid_time < DATE_TRUNC('year', getdate())::date - 360 THEN 1 ELSE 0 END)  = 1
 ),
 
 
 have_not_retained AS (
   SELECT DISTINCT retain_base.crm_member_id
              FROM edw.f_member_order_detail retain_base
-        LEFT JOIN (SELECT DISTINCT crm_member_id FROM all_purchase WHERE order_paid_time >= '2024-01-01' AND order_paid_time < current_date) retained -- end_date
+        LEFT JOIN (SELECT DISTINCT crm_member_id FROM all_purchase WHERE order_paid_time >= DATE_TRUNC('year', getdate())::date AND order_paid_time < current_date) retained -- end_date
                ON retain_base.crm_member_id = retained.crm_member_id
-            WHERE is_rrp_sales_type = 1 
+            WHERE is_rrp_sales_type = 1
               AND if_eff_order_tag IS TRUE
               AND distributor_name <> 'LBR'
               AND distributor_name LIKE '%LCS%' -- distributor_name
-              AND date_id >= '2023-01-01'  -- fixed
-              AND date_id < '2024-01-01'   -- fixed
+              AND date_id >= DATE_TRUNC('year', dateadd(year,-1, current_date))::date  -- fixed
+              AND date_id < DATE_TRUNC('year', getdate())::date   -- fixed
               AND retained.crm_member_id IS NULL
 ),
 
@@ -176,14 +176,14 @@ have_not_reactivated AS (
              FROM edw.f_member_order_detail trans
         LEFT JOIN (SELECT DISTINCT crm_member_id::integer FROM existing_retain_base) retain
                ON trans.crm_member_id::integer = retain.crm_member_id::integer
-          LEFT JOIN (SELECT DISTINCT crm_member_id FROM all_purchase WHERE order_paid_time >= '2024-01-01' AND order_paid_time < current_date) reactivated -- end_date
+          LEFT JOIN (SELECT DISTINCT crm_member_id FROM all_purchase WHERE order_paid_time >= DATE_TRUNC('year', getdate())::date AND order_paid_time < current_date) reactivated -- end_date
                ON trans.crm_member_id = reactivated.crm_member_id
-            WHERE is_rrp_sales_type = 1 
+            WHERE is_rrp_sales_type = 1
               AND if_eff_order_tag IS TRUE
               AND distributor_name <> 'LBR'
               AND distributor_name LIKE '%LCS%'  -- distributor_name
-              AND date_id < '2023-01-01'      -- fixed
-              AND retain.crm_member_id IS NULL 
+              AND date_id < DATE_TRUNC('year', dateadd(year,-1, current_date))::date      -- fixed
+              AND retain.crm_member_id IS NULL
               AND reactivated.crm_member_id IS NULL
 ),
 
@@ -243,21 +243,21 @@ SELECT DISTINCT trans.crm_member_id,
                     COUNT(DISTINCT CASE WHEN if_eff_order_tag = 1 THEN original_order_id ELSE NULL END)                                             AS orders,
                     sum(case when sales_qty > 0 then order_rrp_amt else 0 end) - sum(case when sales_qty < 0 then abs(order_rrp_amt) else 0 end)    AS member_sales
             FROM edw.f_member_order_detail
-            WHERE is_rrp_sales_type = 1 
+            WHERE is_rrp_sales_type = 1
               AND distributor_name <> 'LBR'
               AND date_id < current_date             -- end_date
-              AND date_id >= '2024-01-01'            -- fixed
+              AND date_id >= DATE_TRUNC('year', getdate())::date            -- fixed
               AND crm_member_id IS NOT NULL
               AND distributor_name LIKE '%LCS%'      -- distributor_name
          GROUP BY 1
            HAVING COUNT(DISTINCT CASE WHEN if_eff_order_tag = 1 THEN original_order_id ELSE NULL END) >=2
             ) YTD_repeat
         ON trans.crm_member_id::integer = YTD_repeat.crm_member_id::integer
-  WHERE is_rrp_sales_type = 1 
-  AND  if_eff_order_tag = 1 
+  WHERE is_rrp_sales_type = 1
+  AND  if_eff_order_tag = 1
   AND distributor_name <> 'LBR'
   AND date_id < current_date              -- end_date
-  AND date_id >= '2024-01-01'             -- fixed
+  AND date_id >= DATE_TRUNC('year', getdate())::date             -- fixed
   AND trans.crm_member_id IS NOT NULL
   AND distributor_name LIKE '%LCS%'   -- distributor_name
 ),
@@ -267,33 +267,33 @@ traffic_reg AS (
                CAST(SUM(traffic_amt) AS FLOAT)               AS traffic
           FROM dm.agg_final_sales_by_store_daily traffic_table
           WHERE agg_type = 'LEGO'
-            AND CAST(traffic_table.date_id AS date) >= '2024-01-01'   -- start_date 
+            AND CAST(traffic_table.date_id AS date) >= DATE_TRUNC('year', getdate())::date   -- start_date
             AND CAST(traffic_table.date_id AS date) < current_date    -- end_date
             AND distributor LIKE '%LCS%'                              -- distributor_name
 ),
 
-transaction_cte AS ( SELECT  
+transaction_cte AS ( SELECT
            trans.crm_member_id,
            if_eff_order_tag,
            distributor_name,
            trans.eff_reg_channel,
-           CASE WHEN trans.crm_member_id IS NULL THEN 'non_member' ELSE 'member' END AS is_member_sales, 
+           CASE WHEN trans.crm_member_id IS NULL THEN 'non_member' ELSE 'member' END AS is_member_sales,
            trans.original_order_id,
-           
+
            --------------------------------------------------------------------------
            CASE WHEN existing_retain_base_lcs.crm_member_id IS NOT NULL THEN 1 ELSE 0 END                  AS retained,
            CASE WHEN existing_reactivate_base_lcs.crm_member_id IS NOT NULL THEN 1 ELSE 0 END              AS reactivated,
-           CASE WHEN existing_other_channel_reg_new_belong.crm_member_Id IS NOT NULL THEN 1 ELSE 0 END     AS other_channel_reg_new_belong, 
-           
+           CASE WHEN existing_other_channel_reg_new_belong.crm_member_Id IS NOT NULL THEN 1 ELSE 0 END     AS other_channel_reg_new_belong,
+
            CASE WHEN trans.crm_member_id IS NULL THEN '8 - non_member'
                 WHEN new_member_lcs.member_detail_id IS NOT NULL THEN '1 - new_member'
                 WHEN existing_never_purchased_base.member_detail_id IS NOT NULL THEN '3 - existing - never_purchased'
                 WHEN existing_retain_base_lcs.crm_member_id IS NOT NULL THEN '4 - existing - retained_member'
                 WHEN existing_reactivate_base_lcs.crm_member_id IS NOT NULL THEN '5 - existing - reactivated_member'
                 WHEN existing_other_channel_reg_new_belong.crm_member_id IS NOT NULL THEN '7 - existing - other_channel_reg_new_belong'
-                ELSE '6 - existing - 2024_member_shoppers'
+                ELSE '6 - existing - YTD_member_shoppers'
            END                                                                                                                AS new_vs_existing_member_lcs,
-           
+
                 CASE WHEN trans.crm_member_id IS NULL THEN '10 - non_member'
                 WHEN new_member_lcs.member_detail_id IS NOT NULL THEN '1 - new_member'
                 WHEN existing_never_purchased_base.member_detail_id IS NOT NULL THEN '3 - existing - never_purchased'
@@ -304,7 +304,7 @@ transaction_cte AS ( SELECT
                 WHEN existing_12_month_and_longer_not_purchased_base.crm_member_id IS NOT NULL THEN '9-5 - existing - 360天以上未购'
                 WHEN existing_other_channel_reg_new_belong.crm_member_id IS NOT NULL THEN '7 - existing - other_channel_reg_new_belong'
            END                                                                                                                AS new_vs_existing_member_lcs_v2,
-           
+
            sales_qty,
            order_rrp_amt
 
@@ -315,7 +315,7 @@ transaction_cte AS ( SELECT
        ON trans.crm_member_id::integer = new_member_distributor.member_detail_id::integer
       AND trans.distributor_name = new_member_distributor.eff_reg_channel
   LEFT JOIN existing_never_purchased_base
-        ON trans.crm_member_id::integer = existing_never_purchased_base.member_detail_id::integer 
+        ON trans.crm_member_id::integer = existing_never_purchased_base.member_detail_id::integer
   LEFT JOIN (SELECT DISTINCT crm_member_id FROM existing_retain_base) existing_retain_base_lcs
          ON trans.crm_member_id::integer = existing_retain_base_lcs.crm_member_id::integer
   LEFT JOIN (SELECT DISTINCT crm_member_id FROM existing_reactivate_base) existing_reactivate_base_lcs
@@ -323,7 +323,7 @@ transaction_cte AS ( SELECT
   LEFT JOIN existing_other_channel_reg_new_belong
          ON trans.crm_member_id::integer = existing_other_channel_reg_new_belong.crm_member_id::integer
  -----------------------------------------------------------------
- 
+
   LEFT JOIN existing_3_month_purchased_base
          ON trans.crm_member_id::integer = existing_3_month_purchased_base.crm_member_id::integer
   LEFT JOIN existing_3_month_not_purchased_base
@@ -334,9 +334,9 @@ transaction_cte AS ( SELECT
          ON trans.crm_member_id::integer = existing_9_month_not_purchased_base.crm_member_id::integer
   LEFT JOIN existing_12_month_and_longer_not_purchased_base
          ON trans.crm_member_id::integer = existing_12_month_and_longer_not_purchased_base.crm_member_id::integer
-       WHERE is_rrp_sales_type = 1 
+       WHERE is_rrp_sales_type = 1
           AND distributor_name <> 'LBR'
-          AND date_id >= '2024-01-01'             -- start_date 
+          AND date_id >= DATE_TRUNC('year', getdate())::date             -- start_date
           AND date_id < current_date              -- end_date
           AND distributor_name LIKE '%LCS%'       -- distributor_name
 
@@ -376,7 +376,7 @@ SELECT '4 - existing - retained_member' AS member_type, COUNT(DISTINCT crm_membe
 UNION ALL
 SELECT '5 - existing - reactivated_member' AS member_type, COUNT(DISTINCT crm_member_id) AS member_base FROM existing_reactivate_base
 UNION ALL
-SELECT '6 - existing - 2024_member_shoppers' AS member_type, COUNT(DISTINCT crm_member_id) AS member_base FROM existing_2024_initial_purchase_base
+SELECT '6 - existing - YTD_member_shoppers' AS member_type, COUNT(DISTINCT crm_member_id) AS member_base FROM existing_ytd_initial_purchase_base
 UNION ALL
 SELECT '7 - existing - other_channel_reg_new_belong ' AS member_type, COUNT(DISTINCT crm_member_id) AS member_base FROM existing_other_channel_reg_new_belong
 ),
